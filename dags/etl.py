@@ -1,17 +1,21 @@
+# Importation of librairies
 from datetime import timedelta, datetime
 from airflow.decorators import dag, task
 from airflow.providers.sqlite.hooks.sqlite import SqliteHook
 from airflow.providers.sqlite.operators.sqlite import SqliteOperator
 from sqlalchemy import create_engine
+from bs4 import BeautifulSoup
 import pandas as pd
 import os
 import json
+import html
 
-
+# Static paths
 FILE_PATH = 'source/jobs.csv'
 DESTINATION = 'staging/extracted'
 TRANSF = 'staging/transformed'
 
+# function to extract the csv document
 def extract_data(file_path):
     data_frame = pd.read_csv(file_path)
     return data_frame
@@ -72,6 +76,7 @@ CREATE TABLE IF NOT EXISTS location (
     FOREIGN KEY (job_id) REFERENCES job(id)
 )
 """
+# task that contain the function to create tables
 @task
 def create_tables():
     create_tables = SqliteOperator(
@@ -81,7 +86,7 @@ def create_tables():
     )
 
 
-
+# task that contain the function to extract files from csv
 @task()
 def extract():
     """Extract data from jobs.csv."""
@@ -96,6 +101,7 @@ def extract():
             file.write(str(context_item))
     return os.listdir(DESTINATION)
 
+# task that contain the function to transform the extracted files
 @task()
 def transform():
     """Clean and convert extracted elements to json."""
@@ -164,19 +170,31 @@ def transform():
 
     return transformed_data
 
+# task that contain the function to clear the description part
 def clean_description(description):
-    cleaned_description = description.replace('<br>', '\n').strip()
+    decoded_description = html.unescape(description)
+    html_description = decoded_description.replace('<br>', ' ')
+    # Use BeautifulSoup to remove other HTML tags
+    soup = BeautifulSoup(html_description, 'html.parser')
+    
+    # Remove all HTML tags except for <br>
+    for tag in soup.find_all(True):
+        if tag.name != 'br':
+            tag.replace_with('')
+
+    # Get the cleaned description
+    cleaned_description = soup.get_text(separator=' ', strip=True)
     return cleaned_description
 
+# task that contain the function to load the transformed json files in the sqlLite database
 @task()
 def load():
     """Load data to sqlite database."""
     sqlite_hook = SqliteHook(sqlite_conn_id='sqlite_default')
     data_to_db = TRANSF
 
-   
     # Connect to the SQLite database
-    engine = create_engine(sqlite_hook.get_uri())
+    engine = create_engine(sqlite_hook.get_uri(), future=True)
     connection = engine.connect()
 
     try:
@@ -272,18 +290,21 @@ def load():
                 ))
         else:
             print(f"Le fichier {file_name} est vide. Ignoré.")
+
     except Exception as e:
         print(f"Erreur lors du chargement des données dans la base de données : {str(e)}")
+
     finally:
-        
         connection.close()
 
+# DAG default arguments
 DAG_DEFAULT_ARGS = {
     "depends_on_past": False,
     "retries": 3,
     "retry_delay": timedelta(minutes=2)
 }
 
+# DAG information
 @dag(
     dag_id="etl_dag",
     description="ETL LinkedIn job posts",
@@ -293,6 +314,8 @@ DAG_DEFAULT_ARGS = {
     catchup=False,
     default_args=DAG_DEFAULT_ARGS
 )
+
+# DAG function
 def etl_dag():
 
     """ETL pipeline""" 

@@ -2,16 +2,19 @@
 import pandas as pd
 import os
 import json
+import html
+from bs4 import BeautifulSoup
 from sqlalchemy import create_engine
 from airflow.providers.sqlite.hooks.sqlite import SqliteHook
 from datetime import datetime
 from airflow.models import DAG
-from etl_dag import extract_data, clean_description, create_tables, extract, transform, load
+from etl import extract_data, clean_description, create_tables, extract, transform, load
 from airflow.providers.sqlite.operators.sqlite import SqliteOperator
 
 FILE_PATH = 'source/jobs.csv'
 DESTINATION = 'staging/extracted'
 TRANSF = 'staging/transformed'
+description = "rations)</li><li>Work closely with machine learning engineers to develop production code and deliver end-to-end solutions</li><li>Transform ambiguous business questions into measurable and impactful projects</li><li>Collaborate cross-functionally with teams of biologists, clinical experts, doctors, and commercial leads</li><li>Translate complex problems and solutions and provide actionable insight to executives</li><li>Serve as technical lead on projects and mentor junior and experienced data scientists</li><li>Help further build the team, including"
 
 TABLES_CREATION_QUERY = """CREATE TABLE IF NOT EXISTS job (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,18 +71,6 @@ CREATE TABLE IF NOT EXISTS location (
     FOREIGN KEY (job_id) REFERENCES job(id)
 )
 """
-
-def test_extract_data():
-    data_frame = pd.read_csv(file_path)
-    return data_frame
-    
-    pass
-
-def test_clean_description(description):
-    cleaned_description = description.replace('<br>', '\n').strip()
-    return cleaned_description
-    pass
-
 def test_create_tables():
     create_tables = SqliteOperator(
         task_id="create_tables",
@@ -87,6 +78,21 @@ def test_create_tables():
         sql=TABLES_CREATION_QUERY
     )
     pass
+
+def clean_description(description):
+    decoded_description = html.unescape(description)
+    html_description = decoded_description.replace('<br>', ' ')
+    # Use BeautifulSoup to remove other HTML tags
+    soup = BeautifulSoup(html_description, 'html.parser')
+    
+    # Remove all HTML tags except for <br>
+    for tag in soup.find_all(True):
+        if tag.name != 'br':
+            tag.replace_with('')
+
+    # Get the cleaned description
+    cleaned_description = soup.get_text(separator=' ', strip=True)
+    return cleaned_description
 
 def test_extract():
     extracted_data = extract_data(FILE_PATH)
@@ -169,7 +175,7 @@ def test_transform():
     pass
 
 def test_load():
-    sqlite_hook = SqliteHook(sqlite_conn_id='sqlite_default')
+    sqlite_hook = SqliteHook(sqlite_conn_id='sqlite_default', future=True)
     data_to_db = TRANSF
 
    
